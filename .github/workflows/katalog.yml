@@ -1,0 +1,28 @@
+name: Katalog
+on:
+  schedule:
+    - cron: "15 1 * * *"   # svake noći (03:15 po našem vremenu leti)
+  workflow_dispatch: {}     # ručno: Actions -> Katalog -> Run workflow
+permissions:
+  contents: write
+concurrency: katalog
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: node scripts/sync-catalog.mjs
+        env:
+          SP_TOKEN: ${{ secrets.SP_TOKEN }}
+      - name: Sačuvaj katalog
+        run: |
+          if [ -n "$(git status --porcelain public/data)" ]; then
+            git config user.name "katalog-bot"
+            git config user.email "katalog-bot@users.noreply.github.com"
+            git add public/data/catalog.json
+            git commit -m "Katalog: noćna sinhronizacija"
+            git push
+          fi

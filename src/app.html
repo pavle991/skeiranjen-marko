@@ -474,7 +474,7 @@ function handleCode(raw,source){
   const code=normalize(raw); if(!code) return;
   audioInit();
   const p=findProduct(code);
-  if(!p&&Live.mode==='live'&&source!=='retry'){
+  if(!p&&isLive()&&source!=='retry'){
     toast('warn','Tražim artikal…',code+' nije u sačuvanom katalogu, proveravam Slanje Paketa');
     lookupFresh(code).then(()=>handleCode(code,'retry'));
     return false;
@@ -618,7 +618,7 @@ $('#confirmBtn').onclick=()=>{
   const big=items.filter(i=>i.qty>S.set.warnAt);
   let notes='';
   if(big.length)notes+='<div class="note warn">Proverite količinu: '+big.map(i=>esc(i.name)+' ('+i.qty+')').join(', ')+'</div>';
-  notes+=Live.mode==='live'?'<div class="note info">Najava prijema se šalje u Slanje Paketa.</div>':'<div class="note info">Demo režim: prijem se čuva na ovom telefonu i ne šalje se u Slanje Paketa.</div>';
+  notes+=isLive()?'<div class="note info">Najava prijema se šalje u Slanje Paketa.</div>':'<div class="note info">Demo režim: prijem se čuva na ovom telefonu i ne šalje se u Slanje Paketa.</div>';
   openSheet('<h3>Potvrdi prijem</h3><div class="muted">'+esc(S.worker)+' · '+new Date().toLocaleString('sr-RS')+'</div>'+
     '<div class="lines">'+items.map(i=>'<div class="line"><span class="grow">'+esc(i.name)+'<br><span class="muted mono">'+i.sku+'</span></span><span class="q">'+i.qty+'</span></div>').join('')+
     '<div class="line" style="font-weight:700"><span class="grow">Ukupno ('+items.length+' art.)</span><span class="q">'+total+'</span></div></div>'+notes+
@@ -629,7 +629,7 @@ $('#confirmBtn').onclick=()=>{
     const b=$('#shOk');b.disabled=true;b.innerHTML='<span class="spinner"></span>Šaljem…';
     let res;
     try{
-      res = Live.mode==='live' ? await Api.createReceipt(items) : {id:'D'+Date.now(), no:'D-'+(S.history.length+1)};
+      res = isLive() ? await Api.createReceipt(items) : {id:'D'+Date.now(), no:'D-'+(S.history.length+1)};
     }catch(e){
       $('#shErr').innerHTML='<div class="note warn"><b>Slanje Paketa nije prihvatio prijem.</b><br>'+esc(e.message)+'<br>Stavke su sačuvane, možete pokušati ponovo.</div>'+
         (e.body?'<pre class="mono" style="white-space:pre-wrap;font-size:11.5px;max-height:160px;overflow:auto;background:var(--surface-2);padding:8px;border-radius:8px">'+esc(typeof e.body==='string'?e.body:JSON.stringify(e.body,null,1))+'</pre>':'');
@@ -641,7 +641,7 @@ $('#confirmBtn').onclick=()=>{
     if(Live.mode!=='live'){S.history.unshift(rec); S.history=S.history.slice(0,200);}
     S.items={};S.order=[];S.scanLog=[];save();
     renderPrijem(); feedback('ok');
-    openSheet('<h3>Prijem #'+esc(rec.no)+' kreiran</h3><div class="note ok">'+total+' kom, '+items.length+' artikala.'+(Live.mode==='live'?' Najava je poslata u Slanje Paketa.':' Sačuvano na ovom telefonu (demo).')+'</div>'+
+    openSheet('<h3>Prijem #'+esc(rec.no)+' kreiran</h3><div class="note ok">'+total+' kom, '+items.length+' artikala.'+(isLive()?' Najava je poslata u Slanje Paketa.':' Sačuvano na ovom telefonu (demo).')+'</div>'+
       '<div class="actions"><button class="btn" id="shLbl" type="button">Štampaj nalepnice</button><button class="btn primary" id="shNew" type="button">Novi prijem</button></div>');
     $('#shNew').onclick=closeSheet;
     $('#shLbl').onclick=()=>{closeSheet();labelsFromReceipt(rec);};
@@ -649,6 +649,7 @@ $('#confirmBtn').onclick=()=>{
 };
 
 /* ---------- Veza sa Slanje Paketa (preko servera na Netlify-ju) ---------- */
+function isLive(){return Live.mode==='live'||Live.mode==='building';}
 const Live={mode:'demo',pinRequired:false,msg:'',catAt:null,building:0};
 async function apiFetch(url,opt){
   opt=opt||{};
@@ -691,13 +692,13 @@ const Api={
 const Meta={
   all:{},
   async load(){
-    if(Live.mode==='live'){try{const r=await apiFetch('/api/meta');this.all=r.data||{};return this.all;}catch(e){}}
+    if(isLive()){try{const r=await apiFetch('/api/meta');this.all=r.data||{};return this.all;}catch(e){}}
     this.all=S.meta||{}; return this.all;
   },
   get(id){return this.all[id]||S.meta[id]||{};},
   async set(id,patch){
     S.meta[id]=Object.assign({},S.meta[id]||{},patch); this.all[id]=Object.assign({},this.all[id]||{},patch); save();
-    if(Live.mode==='live'){try{await apiFetch('/api/meta',{method:'POST',body:{id,patch}});}catch(e){}}
+    if(isLive()){try{await apiFetch('/api/meta',{method:'POST',body:{id,patch}});}catch(e){}}
   }
 };
 function markPrinted(){
@@ -710,18 +711,18 @@ function markPrinted(){
 function setPill(){
   const p=$('#modePill');
   const t={demo:['Demo','Slanje u Slanje Paketa se simulira'],live:['Uživo','Povezano sa Slanje Paketa'],pin:['PIN','Upišite PIN aplikacije'],
-    building:['Katalog…','Pripremam katalog'],error:['Greška veze',Live.msg]}[Live.mode];
-  p.textContent=t[0]; p.title=t[1]; p.style.color=Live.mode==='live'?'#8ff0b5':Live.mode==='error'?'#ffb3ad':'#ffd48a';
+    building:['Uživo*','Ceo katalog još nije preuzet'],error:['Greška veze',Live.msg]}[Live.mode];
+  p.textContent=t[0]; p.title=t[1]; p.style.color=isLive()?'#8ff0b5':Live.mode==='error'?'#ffb3ad':'#ffd48a';
 }
 function renderApiState(){
   const el=$('#apiState'); if(!el)return;
   $('#pinWrap').hidden=!Live.pinRequired; $('#setPin').value=S.pin||'';
-  el.className='note '+(Live.mode==='live'?'ok':Live.mode==='error'?'warn':'info');
+  el.className='note '+(isLive()?'ok':Live.mode==='error'?'warn':'info');
   el.style.margin='0';
   el.innerHTML={demo:'Demo režim: server za Slanje Paketa nije podešen na ovom sajtu. Skeniranje i nalepnice rade, prijemi se čuvaju samo na ovom telefonu.',
-    live:'Povezano sa Slanje Paketa.'+(Live.catAt?' Katalog osvežen '+new Date(Live.catAt).toLocaleTimeString('sr-RS',{hour:'2-digit',minute:'2-digit'})+'.':''),
+    live:'Povezano sa Slanje Paketa.'+(Live.fullAt?' Ceo katalog od '+new Date(Live.fullAt).toLocaleString('sr-RS',{day:'numeric',month:'numeric',hour:'2-digit',minute:'2-digit'})+', novi artikli se proveravaju pri svakom otvaranju.':''),
     pin:'Upišite PIN aplikacije da bi se povezala sa Slanje Paketa.',
-    building:'Prvo preuzimanje kataloga iz Slanje Paketa je u toku ('+Live.building+' artikala do sada). Traje oko minut, samo prvi put.',
+    building:'Ceo katalog još nije preuzet, rade samo najnoviji artikli ('+CATALOG.length+'). Na GitHub-u pokrenite Actions → Katalog → Run workflow (jednom), posle ide samo svake noći.',
     error:'Veza nije uspela: '+esc(Live.msg)}[Live.mode];
   $('#catCount').textContent=CATALOG.length;
 }
@@ -730,22 +731,25 @@ function askPin(then){
     '<form id="pForm" style="margin-top:12px;display:grid;gap:10px"><input class="field mono" id="pVal" type="password" inputmode="numeric" autocomplete="off">'+
     '<button class="btn primary" type="submit">Poveži</button></form>');
   setTimeout(()=>$('#pVal').focus(),50);
-  $('#pForm').onsubmit=async e=>{e.preventDefault();S.pin=$('#pVal').value.trim();save();closeSheet();await loadCatalog();if(Live.mode==='live'&&then)then();};
+  $('#pForm').onsubmit=async e=>{e.preventDefault();S.pin=$('#pVal').value.trim();save();closeSheet();await loadCatalog();if(isLive()&&then)then();};
 }
-let catTimer=null;
+let catItems=[];
+function mergeItems(fresh){const seen=new Set(fresh.map(x=>x[0]));catItems=fresh.concat(catItems.filter(x=>!seen.has(x[0])));}
 async function loadCatalog(fresh){
-  clearTimeout(catTimer);
   try{
-    const r=await apiFetch('/api/catalog'+(fresh?'?fresh=1':''));
-    if(r.status===202||(r.data&&r.data.state==='building')){
-      Live.mode='building'; Live.building=(r.data&&r.data.count)||0;
-      catTimer=setTimeout(()=>loadCatalog(),5000);
-    }else{
-      const list=r.data.items.map(fromCompact).filter(p=>p.sku);
-      setCatalog(list); saveCatCache(r.data.items,Date.now());
-      Live.mode='live'; Live.catAt=Date.now();
-      await Meta.load();
+    // 1) ceo katalog (GitHub ga osvežava svake noći)
+    if(!fresh||!catItems.length){
+      const r=await fetch('/data/catalog.json',{cache:'no-cache',headers:{'x-app-pin':S.pin||''}});
+      if(r.status===401){const e=new Error('Pogrešan PIN');e.status=401;throw e;}
+      if(r.ok){const j=await r.json(); catItems=j.items||[]; Live.fullAt=j.syncedAt;} else Live.fullAt=null;
     }
+    // 2) najnoviji artikli direktno iz Slanje Paketa
+    const n=await apiFetch('/api/catalog-new?n='+(fresh?50:20));
+    mergeItems(n.data.items||[]);
+    if(!catItems.length)throw new Error('Katalog je prazan.');
+    setCatalog(catItems.map(fromCompact).filter(p=>p.sku)); saveCatCache(catItems,Date.now());
+    Live.mode=Live.fullAt?'live':'building'; Live.catAt=Date.now();
+    await Meta.load();
   }catch(e){
     if(e.status===401&&Live.pinRequired){Live.mode='pin';S.pin='';save();askPin();}
     else if(CATALOG.length>DEMO_CATALOG.length){Live.mode='live';Live.msg=e.message;} // radi sa sačuvanim katalogom
@@ -756,7 +760,7 @@ async function loadCatalog(fresh){
 // Nepoznat kod u radu uživo: proveri da li je artikal upravo dodat u Slanje Paketa
 let freshBusy=false;
 async function lookupFresh(code){
-  if(Live.mode!=='live'||freshBusy)return null;
+  if(!isLive()||freshBusy)return null;
   freshBusy=true;
   try{await loadCatalog(true);}finally{freshBusy=false;}
   return findProduct(code);
@@ -766,12 +770,12 @@ async function boot(){
   try{const r=await fetch('/api/health',{cache:'no-store'}); if(r.ok&&(r.headers.get('content-type')||'').includes('json'))h=await r.json();}catch(e){}
   if(!h||!h.configured){Live.mode='demo';setPill();renderApiState();return;}
   Live.pinRequired=!!h.pinRequired;
-  const c=readCatCache(); if(c&&c.items&&c.items.length){setCatalog(c.items.map(fromCompact));Live.catAt=c.at;} // odmah iz keša
+  const c=readCatCache(); if(c&&c.items&&c.items.length){catItems=c.items;setCatalog(c.items.map(fromCompact));Live.catAt=c.at;} // odmah iz keša
   if(Live.pinRequired&&!S.pin){Live.mode='pin';setPill();renderApiState();askPin();return;}
   await loadCatalog();
 }
 $('#setPin').addEventListener('change',e=>{e.stopPropagation();S.pin=e.target.value.trim();save();loadCatalog();});
-$('#catReload').onclick=async()=>{const b=$('#catReload');b.disabled=true;await loadCatalog(true);b.disabled=false;toast(Live.mode==='live'?'ok':'warn',Live.mode==='live'?'Katalog osvežen':'Katalog nije učitan',CATALOG.length+' artikala');};
+$('#catReload').onclick=async()=>{const b=$('#catReload');b.disabled=true;await loadCatalog(true);b.disabled=false;toast(isLive()?'ok':'warn',isLive()?'Katalog osvežen':'Katalog nije učitan',CATALOG.length+' artikala');};
 $('#apiTest').onclick=async()=>{
   const d=$('#apiDiag'); d.hidden=false; d.textContent='Testiram…';
   try{const r=await apiFetch('/api/diag'); d.textContent=JSON.stringify(r.data,null,1)+'\n\n(Ovaj tekst možete poslati Claude-u. Ne sadrži token ni lične podatke.)';}
@@ -1024,7 +1028,7 @@ $('#printBtn').onclick=()=>{
 let RECS=[], recAt=null, recErr='';
 function fmtDT(v){if(!v)return '';const d=new Date(v);if(isNaN(d))return String(v);return d.toLocaleDateString('sr-RS',{day:'numeric',month:'numeric'})+' '+d.toLocaleTimeString('sr-RS',{hour:'2-digit',minute:'2-digit'});}
 function recAll(){
-  const base = Live.mode==='live' ? RECS : S.history.map(r=>Object.assign({status:'CREATED'},r));
+  const base = isLive() ? RECS : S.history.map(r=>Object.assign({status:'CREATED'},r));
   return base.map(r=>{const m=Meta.get(r.id);
     return Object.assign({},r,{no:r.no||m.no||r.id,worker:m.worker||r.worker||'',date:r.date||m.createdAt,
       items:(r.items&&r.items.length)?r.items:(m.items||[]),total:r.total||m.total||0,printedAt:m.printedAt,printedBy:m.printedBy});})
@@ -1038,7 +1042,7 @@ function recChips(r){
 }
 function renderReceipts(){
   const h=$('#histList'), list=recAll();
-  $('#recInfo').textContent = Live.mode==='live'
+  $('#recInfo').textContent = isLive()
     ? (recErr?'Greška: '+recErr:(recAt?'Iz Slanje Paketa · osveženo '+fmtDT(recAt):'Učitavam iz Slanje Paketa…'))
     : 'Demo: prijemi sačuvani na ovom telefonu';
   if(!list.length){h.innerHTML='<div class="empty"><p>Još nema prijema. Skenirajte robu i potvrdite prijem.</p></div>';return;}
@@ -1078,7 +1082,7 @@ async function openReceipt(id){
       r=recAll().find(x=>String(x.id)===String(id)); draw(); renderReceipts();};
   };
   draw();
-  if(Live.mode==='live'){ // detalji sa servera (stavke, izbrojane količine)
+  if(isLive()){ // detalji sa servera (stavke, izbrojane količine)
     try{const d=await Api.receipt(id); if(d&&d.items&&d.items.length){r=Object.assign({},r,{items:d.items,total:d.total,status:d.status,verified:d.verified||r.verified}); if(!$('#overlay').hidden)draw();}}catch(e){}
   }
 }

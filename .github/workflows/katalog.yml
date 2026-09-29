@@ -3,6 +3,8 @@ on:
   schedule:
     - cron: "15 1 * * *"   # svake noći (03:15 po našem vremenu leti)
   workflow_dispatch: {}     # ručno: Actions -> Katalog -> Run workflow
+  push:
+    paths: [".github/sync-now"]   # izmena ovog fajla pokreće preuzimanje
 permissions:
   contents: write
 concurrency: katalog

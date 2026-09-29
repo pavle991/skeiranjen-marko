@@ -2,7 +2,12 @@ name: Katalog
 on:
   schedule:
     - cron: "15 1 * * *"   # svake noći (03:15 po našem vremenu leti)
-  workflow_dispatch: {}     # ručno: Actions -> Katalog -> Run workflow
+  workflow_dispatch:        # ručno: Actions -> Katalog -> Run workflow
+    inputs:
+      full:
+        description: "Preuzmi sve artikle ispočetka"
+        type: boolean
+        default: false
   push:
     paths: [".github/sync-now"]   # izmena ovog fajla pokreće preuzimanje
 permissions:
@@ -19,6 +24,7 @@ jobs:
       - run: node scripts/sync-catalog.mjs
         env:
           SP_TOKEN: ${{ secrets.SP_TOKEN }}
+          FULL: ${{ inputs.full }}
       - name: Sačuvaj katalog
         run: |
           if [ -n "$(git status --porcelain public/data)" ]; then

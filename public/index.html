@@ -353,7 +353,15 @@ h2{font-size:13px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-
   <div style="display:flex;flex-direction:column;gap:14px">
     <div class="row"><div class="grow"><h2>Prijemi</h2><div class="muted" id="recInfo"></div></div>
       <button class="btn" id="recRefresh" type="button" style="height:40px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>Osveži</button></div>
-    <div class="card"><div id="histList"></div></div>
+    <div class="card pad">
+      <h2>Pretraga po proizvodu</h2>
+      <p class="muted" style="margin:4px 0 10px">U kojim prijemima je bio artikal, sa statusom i količinama.</p>
+      <div class="row"><input class="field grow" id="recSearch" placeholder="Naziv, šifra ili SP kod (npr. duks 378 L)" autocomplete="off" enterkeyhint="search">
+        <button class="btn" id="recSearchClear" type="button" hidden>Poništi</button></div>
+      <div class="suggest" id="recSuggest"></div>
+    </div>
+    <div class="card" id="recResults" hidden></div>
+    <div class="card" id="recListCard"><div id="histList"></div></div>
   </div>
 </div>
 
@@ -1442,7 +1450,7 @@ async function refreshReceipts(){
 }
 $('#recRefresh').onclick=refreshReceipts;
 async function openReceipt(id){
-  let r=recAll().find(x=>String(x.id)===String(id)); if(!r)return;
+  let r=findRecord(id); if(!r)return;
   const draw=()=>{
     const hasCount=r.items.some(i=>i.counted!=null&&i.counted!=='');
     openSheet('<h3>Prijem #'+esc(r.no)+'</h3><div class="chips" style="margin-top:6px">'+recChips(r)+'</div>'+
@@ -1461,7 +1469,7 @@ async function openReceipt(id){
     $('#rClose').onclick=closeSheet;
     $('#rLbl').onclick=()=>{closeSheet();labelsFromReceipt(r);};
     $('#rTog').onclick=async()=>{await Meta.set(r.id,r.printedAt?{printedAt:null,printedBy:null}:{printedAt:new Date().toISOString(),printedBy:S.worker});
-      r=recAll().find(x=>String(x.id)===String(id)); draw(); renderReceipts();};
+      r=findRecord(id); draw(); renderReceipts();};
   };
   draw();
   if(isLive()){ // detalji sa servera (stavke, izbrojane količine)
@@ -1469,6 +1477,67 @@ async function openReceipt(id){
   }
 }
 $('#histList').addEventListener('click',e=>{const b=e.target.closest('[data-rec]');if(b)openReceipt(b.dataset.rec);});
+
+/* ---------- Pretraga prijema po proizvodu ---------- */
+let ALLRECS=null, allRecsAt=null;
+async function loadAllRecs(){
+  if(ALLRECS||!isLive())return ALLRECS||[];
+  try{const r=await fetch('/data/receipts.json',{cache:'no-cache',headers:{'x-app-pin':S.pin||''}});
+    if(r.ok){const j=await r.json();allRecsAt=j.syncedAt;
+      ALLRECS=j.items.map(x=>mapShipment({_id:x[0],number:x[1],status:x[2],created_at:x[3],arrived_at:x[4],counted_at:x[5],
+        products:x[6].map(l=>({code:l[0],dispatch_quantity:l[1],receipt_quantity:l[2]}))}));}
+  }catch(e){}
+  return ALLRECS||[];
+}
+function recsForSearch(){ // živi (najnoviji) imaju prednost nad noćnom listom
+  const byId=new Map(); (ALLRECS||[]).forEach(r=>byId.set(r.id,r));
+  (isLive()?RECS:S.history.map(r=>Object.assign({status:'CREATED'},r))).forEach(r=>byId.set(String(r.id),Object.assign({},byId.get(String(r.id))||{},r)));
+  return [...byId.values()];
+}
+function findRecord(id){return recAll().find(x=>String(x.id)===String(id))||recsForSearch().find(x=>String(x.id)===String(id));}
+async function searchReceipts(products,label){
+  $('#recSuggest').innerHTML=''; $('#recSearchClear').hidden=false;
+  const box=$('#recResults'); box.hidden=false; box.innerHTML='<div class="empty"><span class="spinner" style="border-color:var(--line);border-top-color:var(--accent);display:inline-block"></span></div>';
+  await loadAllRecs(); if(isLive()&&!RECS.length){try{RECS=await Api.receipts();}catch(e){}}
+  const skus=new Set(products.map(p=>p.sku)), codes=new Set(products.map(p=>p.code).filter(Boolean));
+  const hits=[];
+  recsForSearch().forEach(r=>{
+    const lines=r.items.filter(i=>skus.has(i.sku)||codes.has(i.name)||codes.has(i.sku));
+    if(lines.length){const m=Meta.get(r.id);hits.push(Object.assign({},r,{lines,worker:m.worker||r.worker,printedAt:m.printedAt,no:r.no||m.no||r.id}));}
+  });
+  hits.sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+  const sum=(k)=>hits.reduce((a,r)=>a+r.lines.reduce((x,l)=>x+(Number(l[k])||0),0),0);
+  const counted=hits.filter(r=>r.status==='COUNTED');
+  box.innerHTML='<div class="pad" style="padding-bottom:6px"><div class="iname">'+esc(label)+'</div>'+
+    '<div class="muted">'+(hits.length?('U '+hits.length+(hits.length===1?' prijemu':' prijema')+' · najavljeno ukupno <b class="mono">'+sum('qty')+'</b>'+(counted.length?' · izbrojano <b class="mono">'+counted.reduce((a,r)=>a+r.lines.reduce((x,l)=>x+(Number(l.counted)||0),0),0)+'</b>':'')):'Nije pronađen ni u jednom prijemu.')+
+    (allRecsAt?' · lista od '+esc(fmtDT(allRecsAt)):'')+'</div></div>'+
+    hits.map(r=>{
+      const st=STAT[r.status]||[r.status,'neutral'];
+      const q=r.lines.map(l=>(r.lines.length>1||products.length>1?esc(splitName(l.name).size||l.name)+': ':'')+l.qty+(l.counted!=null?' → '+l.counted:'')).join(' · ');
+      return '<button class="rec" type="button" data-rec="'+esc(r.id)+'"><span class="t1">Prijem #'+esc(r.no)+'</span><span class="qtyb">'+r.lines.reduce((a,l)=>a+l.qty,0)+' kom</span>'+
+        '<span class="t2">'+esc(fmtDT(r.date))+(r.worker?' · '+esc(r.worker):'')+'</span>'+
+        '<span class="chips"><span class="chip '+st[1]+'">'+esc(st[0])+(r.status==='COUNTED'&&r.verified?' '+esc(fmtDT(r.verified)):r.status==='ARRIVED'&&r.arrived?' '+esc(fmtDT(r.arrived)):'')+'</span>'+
+        '<span class="chip neutral">najavljeno'+(r.lines.some(l=>l.counted!=null)?' → izbrojano':'')+': '+q+'</span></span></button>';
+    }).join('');
+  $('#recListCard').hidden=true;
+}
+function clearRecSearch(){$('#recSearch').value='';$('#recSuggest').innerHTML='';$('#recResults').hidden=true;$('#recSearchClear').hidden=true;$('#recListCard').hidden=false;}
+$('#recSearchClear').onclick=clearRecSearch;
+$('#recSearch').addEventListener('input',e=>{
+  const q=e.target.value; if(!q.trim()){$('#recSuggest').innerHTML='';return;}
+  const exact=findProduct(q); const hits=exact?[exact]:searchCat(q);
+  let h='';
+  if(hits.length>1)h+='<button type="button" data-all="1"><span><b>Svi pronađeni artikli ('+hits.length+')</b><br><span class="muted">npr. sve veličine jednog modela</span></span><span>Traži</span></button>';
+  $('#recSuggest').innerHTML=h+(hits.length?hits.map(p=>'<button type="button" data-p="'+esc(p.sku)+'"><span><b>'+esc(p.name)+'</b><br><span class="muted mono">'+esc(p.sku)+'</span></span><span>Traži</span></button>').join(''):'<p class="muted">Nema artikla za „'+esc(q)+'“.</p>');
+  $('#recSuggest')._hits=hits;
+});
+$('#recSuggest').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b)return; const hits=$('#recSuggest')._hits||[];
+  if(b.dataset.all)searchReceipts(hits,'„'+$('#recSearch').value.trim()+'“ ('+hits.length+' artikala)');
+  else{const p=BY_SKU.get(b.dataset.p); if(p)searchReceipts([p],p.name);}
+});
+$('#recSearch').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();const b=$('#recSuggest button');if(b)b.click();}});
+$('#recResults').addEventListener('click',e=>{const b=e.target.closest('[data-rec]');if(b)openReceipt(b.dataset.rec);});
 
 /* ---------- Podešavanja ---------- */
 function renderSettings(){

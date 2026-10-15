@@ -354,6 +354,13 @@ h2{font-size:13px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-
     <div class="row"><div class="grow"><h2>Prijemi</h2><div class="muted" id="recInfo"></div></div>
       <button class="btn" id="recRefresh" type="button" style="height:40px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>Osveži</button></div>
     <div class="card pad">
+      <h2>Uvoz prijema iz Excela</h2>
+      <p class="muted" style="margin:4px 0 10px">Izaberite jedan ili više Excel fajlova (Šifra proizvoda, Poslata količina). Za svaki fajl se pravi poseban prijem u Slanje Paketa, a svi zajedno se čuvaju kao <b>paket</b> za štampu nalepnica odjednom.</p>
+      <label class="btn primary" for="impFiles" style="width:100%">Izaberi Excel fajlove</label>
+      <input type="file" id="impFiles" accept=".xlsx,.xls,.csv" multiple hidden>
+    </div>
+    <div class="card" id="batchCard" hidden><div class="row pad" style="padding-bottom:4px"><h2 class="grow">Paketi prijema</h2></div><div id="batchList"></div></div>
+    <div class="card pad">
       <h2>Pretraga po proizvodu</h2>
       <p class="muted" style="margin:4px 0 10px">U kojim prijemima je bio artikal, sa statusom i količinama.</p>
       <div class="row"><input class="field grow" id="recSearch" placeholder="Naziv, šifra ili SP kod (npr. duks 378 L)" autocomplete="off" enterkeyhint="search">
@@ -711,8 +718,10 @@ const Meta={
 };
 function markPrinted(){
   if(!S.labelFor)return;
-  Meta.set(S.labelFor.id,{printedAt:new Date().toISOString(),printedBy:S.worker});
-  toast('ok','Prijem #'+S.labelFor.no+' označen kao odštampan');
+  const stamp={printedAt:new Date().toISOString(),printedBy:S.worker};
+  Meta.set(S.labelFor.id,stamp);
+  (S.labelFor.receipts||[]).forEach(id=>Meta.set(id,stamp)); // paket: označi i sve njegove prijeme
+  toast('ok',(S.labelFor.receipts?'':'Prijem #')+S.labelFor.no+' označen kao odštampan');
 }
 
 /* ---------- Pokretanje ---------- */
@@ -916,7 +925,7 @@ document.addEventListener('keydown',e=>{
 
 /* ---------- Nalepnice ---------- */
 function addLabel(sku,n){const q=S.labelQueue.find(x=>x.sku===sku); if(q)q.count+=n; else S.labelQueue.push({sku,count:n}); save(); if(tab==='nalepnice')renderLabels();}
-function labelsFromReceipt(rec){S.labelQueue=rec.items.filter(i=>BY_SKU.has(i.sku)).map(i=>({sku:i.sku,count:i.qty}));S.labelFor={id:rec.id,no:rec.no||rec.id};save();switchTab('nalepnice');toast('ok','Nalepnice pripremljene',rec.total+' nalepnica iz prijema');}
+function labelsFromReceipt(rec){S.labelQueue=rec.items.filter(i=>BY_SKU.has(i.sku)).map(i=>({sku:i.sku,count:i.qty}));S.labelFor={id:rec.id,no:rec.no||rec.id,receipts:rec.receipts?rec.receipts.map(x=>x.id):undefined};save();switchTab('nalepnice');toast('ok','Nalepnice pripremljene',rec.total+' nalepnica iz prijema');}
 function geom(){
   const s=S.set, cols=Math.max(1,s.cols|0), rows=Math.max(1,s.rows|0);
   const ml=s.ml*10, mt=s.mt*10, mr=s.mr*10, mb=s.mb*10;
@@ -955,7 +964,7 @@ function sheetHtml(sh){
 }
 function renderLabels(){
   const q=$('#lblQueue'), g=geom();
-  const lf=$('#lblFor'); lf.hidden=!S.labelFor; if(S.labelFor)lf.innerHTML='Nalepnice za prijem <b>#'+esc(S.labelFor.no)+'</b>. Kad pošaljete na štampu, prijem se označava kao odštampan.';
+  const lf=$('#lblFor'); lf.hidden=!S.labelFor; if(S.labelFor)lf.innerHTML=S.labelFor.receipts?'Nalepnice za <b>'+esc(S.labelFor.no)+'</b> ('+S.labelFor.receipts.length+' prijema). Kad pošaljete na štampu, svi prijemi iz paketa se označavaju kao odštampani.':'Nalepnice za prijem <b>#'+esc(S.labelFor.no)+'</b>. Kad pošaljete na štampu, prijem se označava kao odštampan.';
   if(!S.labelQueue.length){q.innerHTML='<div class="empty" style="padding:18px"><p>Lista za štampu je prazna. Skenirajte ili pretražite artikal, ili otvorite prijem iz istorije.</p></div>';}
   else q.innerHTML=S.labelQueue.map((x,i)=>{const p=BY_SKU.get(x.sku)||{name:x.sku};
     return '<div class="lq"><div style="min-width:0"><div class="iname">'+esc(p.name)+'</div><div class="isku mono">'+esc(x.sku)+'</div></div>'+
@@ -1049,6 +1058,7 @@ function recChips(r){
   return h;
 }
 function renderReceipts(){
+  renderBatches();
   const h=$('#histList'), list=recAll();
   $('#recInfo').textContent = isLive()
     ? (recErr?'Greška: '+recErr:(recAt?'Iz Slanje Paketa · osveženo '+fmtDT(recAt):'Učitavam iz Slanje Paketa…'))
@@ -1095,6 +1105,107 @@ async function openReceipt(id){
   }
 }
 $('#histList').addEventListener('click',e=>{const b=e.target.closest('[data-rec]');if(b)openReceipt(b.dataset.rec);});
+
+/* ---------- Uvoz prijema iz Excela + paketi ---------- */
+function batchesAll(){
+  const all=Object.assign({},S.meta||{},Meta.all||{});
+  return Object.entries(all).filter(([k,v])=>v&&v.type==='batch').map(([k,v])=>Object.assign({id:k},v))
+    .sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+}
+function renderBatches(){
+  const list=batchesAll().slice(0,30), card=$('#batchCard'); card.hidden=!list.length; if(!list.length)return;
+  $('#batchList').innerHTML=list.map(b=>'<button class="rec" type="button" data-batch="'+esc(b.id)+'"><span class="t1">'+esc(b.name)+'</span><span class="qtyb">'+b.total+' kom</span>'+
+    '<span class="t2">'+esc(fmtDT(b.createdAt))+(b.worker?' · '+esc(b.worker):'')+' · '+b.receipts.length+' prijema: #'+b.receipts.map(r=>esc(r.no)).join(', #')+'</span>'+
+    '<span class="chips">'+(b.printedAt?'<span class="chip ok">Odštampano '+esc(fmtDT(b.printedAt))+'</span>':'<span class="chip err">Nije štampano</span>')+'</span></button>').join('');
+}
+function openBatch(id){
+  const b=batchesAll().find(x=>x.id===id); if(!b)return;
+  const items=b.items.map(i=>{const p=BY_PCODE.get(i.code)||BY_SKU.get(i.sku);return Object.assign({},i,{sku:p?p.sku:i.sku,name:p?p.name:i.code});});
+  openSheet('<h3>'+esc(b.name)+'</h3><div class="muted">'+esc(fmtDT(b.createdAt))+(b.worker?' · '+esc(b.worker):'')+'</div>'+
+    '<div class="lines">'+b.receipts.map(r=>'<div class="line"><span class="grow">Prijem #'+esc(r.no)+'<br><span class="muted">'+esc(r.file||'')+'</span></span><span class="q">'+r.total+'</span></div>').join('')+
+    '<div class="line" style="font-weight:700"><span class="grow">Ukupno nalepnica</span><span class="q">'+b.total+'</span></div></div>'+
+    '<div class="actions"><button class="btn" id="bClose" type="button">Zatvori</button><button class="btn primary" id="bLbl" type="button">Štampaj nalepnice za sve</button></div>');
+  $('#bClose').onclick=closeSheet;
+  $('#bLbl').onclick=()=>{closeSheet();labelsFromReceipt({id:b.id,no:b.name,items,total:b.total,receipts:b.receipts});};
+}
+$('#batchList').addEventListener('click',e=>{const x=e.target.closest('[data-batch]');if(x)openBatch(x.dataset.batch);});
+
+function parseReceiptSheet(rows){
+  let hi=-1,codeC=-1,qtyC=-1,barC=-1;
+  for(let r=0;r<Math.min(rows.length,15)&&hi<0;r++){
+    const h=rows[r].map(x=>String(x||'').toLowerCase().trim());
+    const c=h.findIndex(x=>/šifra|sifra|code/.test(x)), q=h.findIndex(x=>/količina|kolicina|qty|quantity/.test(x));
+    if(c>=0&&q>=0){hi=r;codeC=c;qtyC=q;barC=h.findIndex(x=>/barkod|barcode|ean/.test(x));}
+  }
+  if(hi<0)throw new Error('nema kolona „Šifra proizvoda“ i „Poslata količina“');
+  const map=new Map();
+  for(let r=hi+1;r<rows.length;r++){
+    const code=String(rows[r][codeC]||'').trim(), qty=Math.round(Number(String(rows[r][qtyC]).replace(',','.')));
+    if(!code||!(qty>0))continue;
+    const bar=barC>=0?String(rows[r][barC]||'').trim():'';
+    const k=code; const cur=map.get(k); if(cur)cur.qty+=qty; else map.set(k,{code,bar,qty});
+  }
+  if(!map.size)throw new Error('nema redova sa šifrom i količinom');
+  return [...map.values()];
+}
+function prettyFileName(n){return n.replace(/\.(xlsx|xls|csv)$/i,'').replace(/^[0-9a-f]{8}-/i,'').replace(/_/g,' ');}
+$('#impFiles').addEventListener('change',async e=>{
+  const files=[...e.target.files]; e.target.value=''; if(!files.length)return;
+  if(!S.worker){askWorker();return;}
+  const parsed=[];
+  for(const f of files){
+    try{const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});
+      const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:false,defval:''});
+      parsed.push({file:prettyFileName(f.name),lines:parseReceiptSheet(rows)});}
+    catch(err){parsed.push({file:prettyFileName(f.name),error:err.message||String(err)});}
+  }
+  const match=l=>BY_PCODE.get(l.code)||(l.bar&&findProduct(l.bar));
+  if(isLive()&&parsed.some(p=>p.lines&&p.lines.some(l=>!match(l))))await loadCatalog(true); // možda su artikli upravo dodati
+  parsed.forEach(p=>(p.lines||[]).forEach(l=>{const pr=match(l);l.product=pr||null;}));
+  const ok=parsed.filter(p=>p.lines), total=ok.reduce((a,p)=>a+p.lines.reduce((x,l)=>x+l.qty,0),0);
+  const unknown=ok.flatMap(p=>p.lines.filter(l=>!l.product).map(l=>l.code));
+  openSheet('<h3>Uvoz '+files.length+(files.length===1?' fajla':' fajlova')+'</h3><div class="muted">'+esc(S.worker)+' · '+ok.length+' prijema · '+total+' kom</div>'+
+    '<div class="lines">'+parsed.map(p=>'<div class="line"><span class="grow"><b>'+esc(p.file)+'</b><br>'+
+      (p.error?'<span style="color:var(--err)">Preskačem: '+esc(p.error)+'</span>':p.lines.map(l=>esc(l.code)+' × '+l.qty+(l.product?'':' <span class="chip warn" style="margin:0">nije u katalogu</span>')).join('<br>'))+
+      '</span><span class="q">'+(p.lines?p.lines.reduce((x,l)=>x+l.qty,0):'—')+'</span></div>').join('')+'</div>'+
+    (unknown.length?'<div class="note warn">'+unknown.length+' artikala nije pronađeno u katalogu. Prijem će ih ipak poslati u Slanje Paketa (ako šifra postoji tamo, prihvatiće je), ali za njih neće biti nalepnica.</div>':'')+
+    '<div class="note info">Biće napravljeno <b>'+ok.length+' posebnih prijema</b> u Slanje Paketa'+(isLive()?'':' (demo: samo na ovom telefonu)')+' i jedan <b>paket</b> sa svima zajedno za štampu nalepnica. Paket nije dodatni prijem u Slanje Paketa.</div>'+
+    '<div id="impProg"></div><div class="actions"><button class="btn" id="impBack" type="button">Otkaži</button><button class="btn primary" id="impGo" type="button"'+(ok.length?'':' disabled')+'>Napravi '+ok.length+' prijema</button></div>');
+  $('#impBack').onclick=closeSheet;
+  $('#impGo').onclick=async()=>{
+    const go=$('#impGo'),back=$('#impBack'); go.disabled=true; back.disabled=true;
+    const done=[],failed=[];
+    for(let i=0;i<ok.length;i++){
+      const p=ok[i]; go.innerHTML='<span class="spinner"></span>'+(i+1)+' / '+ok.length;
+      const items=p.lines.map(l=>({sku:l.product?l.product.sku:l.code,code:l.code,name:l.product?l.product.name:l.code,qty:l.qty}));
+      const sum=items.reduce((a,b)=>a+b.qty,0);
+      try{
+        const res=isLive()?await apiFetch('/api/receipts',{method:'POST',body:{items:items.map(x=>({code:x.code,qty:x.qty}))}}).then(r=>mapShipment(r.data)).then(m=>({id:m.id,no:m.no}))
+                          :{id:'D'+Date.now()+i,no:'D-'+(S.history.length+1)};
+        const now=new Date().toISOString();
+        await Meta.set(String(res.id),{no:res.no,worker:S.worker,createdAt:now,items,total:sum,file:p.file});
+        if(!isLive()){S.history.unshift({id:String(res.id),no:res.no,date:now,worker:S.worker,items,total:sum,status:'CREATED'});save();}
+        done.push({id:String(res.id),no:res.no,file:p.file,total:sum,items});
+      }catch(err){failed.push({file:p.file,error:err.message});}
+      $('#impProg').innerHTML='<div class="note '+(failed.length?'warn':'ok')+'">Napravljeno '+done.length+' od '+ok.length+(failed.length?'. Greške: '+failed.map(f=>esc(f.file)+' ('+esc(f.error)+')').join('; '):'')+'</div>';
+    }
+    let batch=null;
+    if(done.length){
+      const agg=new Map(); done.forEach(d=>d.items.forEach(it=>{const c=agg.get(it.code);if(c)c.qty+=it.qty;else agg.set(it.code,{code:it.code,sku:it.sku,qty:it.qty});}));
+      const id='batch-'+Date.now(), d=new Date();
+      batch={type:'batch',name:'Paket '+d.toLocaleDateString('sr-RS',{day:'numeric',month:'numeric'})+' '+d.toLocaleTimeString('sr-RS',{hour:'2-digit',minute:'2-digit'}),
+        createdAt:d.toISOString(),worker:S.worker,receipts:done.map(x=>({id:x.id,no:x.no,file:x.file,total:x.total})),items:[...agg.values()],total:done.reduce((a,x)=>a+x.total,0)};
+      await Meta.set(id,batch); batch.id=id;
+    }
+    feedback(failed.length?'warn':'ok');
+    back.disabled=false; back.textContent='Zatvori'; back.onclick=()=>{closeSheet();refreshReceipts();};
+    if(batch){go.disabled=false;go.textContent='Štampaj nalepnice za paket';go.onclick=()=>{closeSheet();refreshReceipts();openBatchLabels(batch.id);};}
+    else go.textContent='Nije napravljen nijedan prijem';
+  };
+});
+function openBatchLabels(id){const b=batchesAll().find(x=>x.id===id);if(!b)return;
+  const items=b.items.map(i=>{const p=BY_PCODE.get(i.code)||BY_SKU.get(i.sku);return {sku:p?p.sku:i.sku,qty:i.qty};});
+  labelsFromReceipt({id:b.id,no:b.name,items,total:b.total,receipts:b.receipts});}
 
 /* ---------- Pretraga prijema po proizvodu ---------- */
 let ALLRECS=null, allRecsAt=null;

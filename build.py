@@ -3,7 +3,8 @@
 import subprocess, tempfile, os, tarfile, glob
 LIBS = [("@zxing/library@0.23.0", "package/umd/index.min.js"),
         ("jsbarcode@3.12.3", "package/dist/JsBarcode.all.min.js"),
-        ("jspdf@4.2.1", "package/dist/jspdf.umd.min.js")]
+        ("jspdf@4.2.1", "package/dist/jspdf.umd.min.js"),
+        ("xlsx@0.18.5", "package/dist/xlsx.mini.min.js")]
 tmp = tempfile.mkdtemp(); parts = []
 for spec, path in LIBS:
     out = subprocess.check_output(["npm", "pack", spec, "--silent"], cwd=tmp, text=True).strip().splitlines()[-1]

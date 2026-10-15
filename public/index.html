@@ -826,9 +826,11 @@ const DEMO_CATALOG = [
 ];
 let CATALOG=[], BY_SKU=new Map(), BY_CODE=new Map(), BY_PCODE=new Map();
 function setCatalog(list){
-  CATALOG=list; BY_SKU=new Map(list.map(p=>[p.sku,p])); BY_CODE=new Map(); BY_PCODE=new Map(list.filter(p=>p.code).map(p=>[p.code,p]));
+  CATALOG=list; BY_SKU=new Map(list.map(p=>[p.sku,p])); BY_CODE=new Map(); BY_PCODE=new Map(list.filter(p=>p.code).map(p=>[pcode(p.code),p]));
   list.forEach(p=>{[p.sku].concat(p.eans||[]).forEach(c=>{if(c)BY_CODE.set(normalize(c),p);});});
 }
+function pcode(c){return String(c||'').replace(/[\u00a0\s]+/g,' ').trim().toLowerCase();}
+function byCode(c){return BY_PCODE.get(pcode(c));}
 function findProduct(code){return BY_CODE.get(normalize(code))||null;}
 function splitName(n){const i=n.lastIndexOf(' - ');return i>0?{model:n.slice(0,i),size:n.slice(i+3)}:{model:n,size:''};}
 
@@ -1080,7 +1082,7 @@ const STAT={CREATED:['Najavljeno','neutral'],ARRIVED:['Pristiglo','info'],COUNTE
 function mapShipment(o){
   const status=String(o.status||'CREATED').toUpperCase();
   const items=(o.products||[]).map(l=>{
-    const p=BY_PCODE.get(l.code)||findProduct(l.ean_code||'');
+    const p=byCode(l.code)||findProduct(l.ean_code||'');
     return {sku:p?p.sku:l.code,name:p?p.name:l.code,qty:Number(l.dispatch_quantity||0),
       counted:(status==='COUNTED'||status==='ARRIVED')?Number(l.receipt_quantity||0):null};
   });
@@ -1145,6 +1147,24 @@ function askPin(then){
   $('#pForm').onsubmit=async e=>{e.preventDefault();S.pin=$('#pVal').value.trim();save();closeSheet();await loadCatalog();if(isLive()&&then)then();};
 }
 let catItems=[];
+async function syncNewProducts(){
+  const known=new Set(catItems.map(x=>x[0])); let cursor=null, got=[];
+  for(let i=0;i<20;i++){
+    const r=await apiFetch('/api/catalog-new?n='+(i?100:30)+(cursor?'&cursor='+encodeURIComponent(cursor):''));
+    const items=r.data.items||[]; let hit=false;
+    for(const it of items){if(known.has(it[0])){hit=true;break;}got.push(it);}
+    if(hit||!r.data.nextCursor||!items.length||!known.size)break;
+    cursor=r.data.nextCursor;
+  }
+  if(got.length)mergeItems(got);
+  Live.newCount=got.length;
+}
+// tačna provera po šifri (za uvoz iz Excela)
+async function fetchByCodes(codes){
+  const got=[];
+  for(const c of codes){try{const r=await apiFetch('/api/product?code='+encodeURIComponent(c));got.push(...(r.data.items||[]));}catch(e){}}
+  if(got.length){mergeItems(got);setCatalog(catItems.map(fromCompact).filter(p=>p.sku));saveCatCache(catItems,Date.now());}
+}
 function mergeItems(fresh){const seen=new Set(fresh.map(x=>x[0]));catItems=fresh.concat(catItems.filter(x=>!seen.has(x[0])));}
 async function loadCatalog(fresh){
   try{
@@ -1154,9 +1174,8 @@ async function loadCatalog(fresh){
       if(r.status===401){const e=new Error('Pogrešan PIN');e.status=401;throw e;}
       if(r.ok){const j=await r.json(); catItems=j.items||[]; Live.fullAt=j.syncedAt;} else Live.fullAt=null;
     }
-    // 2) najnoviji artikli direktno iz Slanje Paketa
-    const n=await apiFetch('/api/catalog-new?n='+(fresh?50:20));
-    mergeItems(n.data.items||[]);
+    // 2) svi artikli dodati posle noćnog preuzimanja: strana po strana dok ne naiđemo na poznat
+    await syncNewProducts();
     if(!catItems.length)throw new Error('Katalog je prazan.');
     setCatalog(catItems.map(fromCompact).filter(p=>p.sku)); saveCatCache(catItems,Date.now());
     Live.mode=Live.fullAt?'live':'building'; Live.catAt=Date.now();
@@ -1305,7 +1324,8 @@ function onDetect(code){
 $('#camBtn').onclick=startCamera;
 $('#pauseBtn').onclick=stopCamera;
 $('#torchBtn').onclick=async()=>{if(!cam.track)return;cam.torch=!cam.torch;try{await cam.track.applyConstraints({advanced:[{torch:cam.torch}]});}catch(e){cam.torch=false;}$('#torchBtn').setAttribute('aria-pressed',String(cam.torch));};
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&cam.running)stopCamera();});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&cam.running)stopCamera();
+  if(!document.hidden&&isLive()&&Date.now()-(Live.catAt||0)>5*60e3)loadCatalog(true);}); // vraćanje u aplikaciju: proveri nove artikle
 
 /* ---------- Hardverski skener (tastatura) ---------- */
 let kbBuf='',kbT=0;
@@ -1514,7 +1534,7 @@ function renderBatches(){
 }
 function openBatch(id){
   const b=batchesAll().find(x=>x.id===id); if(!b)return;
-  const items=b.items.map(i=>{const p=BY_PCODE.get(i.code)||BY_SKU.get(i.sku);return Object.assign({},i,{sku:p?p.sku:i.sku,name:p?p.name:i.code});});
+  const items=b.items.map(i=>{const p=byCode(i.code)||BY_SKU.get(i.sku);return Object.assign({},i,{sku:p?p.sku:i.sku,name:p?p.name:i.code});});
   openSheet('<h3>'+esc(b.name)+'</h3><div class="muted">'+esc(fmtDT(b.createdAt))+(b.worker?' · '+esc(b.worker):'')+'</div>'+
     '<div class="lines">'+b.receipts.map(r=>'<div class="line"><span class="grow">Prijem #'+esc(r.no)+'<br><span class="muted">'+esc(r.file||'')+'</span></span><span class="q">'+r.total+'</span></div>').join('')+
     '<div class="line" style="font-weight:700"><span class="grow">Ukupno nalepnica</span><span class="q">'+b.total+'</span></div></div>'+
@@ -1553,8 +1573,8 @@ $('#impFiles').addEventListener('change',async e=>{
       parsed.push({file:prettyFileName(f.name),lines:parseReceiptSheet(rows)});}
     catch(err){parsed.push({file:prettyFileName(f.name),error:err.message||String(err)});}
   }
-  const match=l=>BY_PCODE.get(l.code)||(l.bar&&findProduct(l.bar));
-  if(isLive()&&parsed.some(p=>p.lines&&p.lines.some(l=>!match(l))))await loadCatalog(true); // možda su artikli upravo dodati
+  const match=l=>byCode(l.code)||(l.bar&&findProduct(l.bar));
+  if(isLive()){const miss=[...new Set(parsed.flatMap(p=>(p.lines||[]).filter(l=>!match(l)).map(l=>l.code)))];if(miss.length)await fetchByCodes(miss.slice(0,60));} // artikli dodati posle noćnog preuzimanja
   parsed.forEach(p=>(p.lines||[]).forEach(l=>{const pr=match(l);l.product=pr||null;}));
   const ok=parsed.filter(p=>p.lines), total=ok.reduce((a,p)=>a+p.lines.reduce((x,l)=>x+l.qty,0),0);
   const unknown=ok.flatMap(p=>p.lines.filter(l=>!l.product).map(l=>l.code));
@@ -1598,7 +1618,7 @@ $('#impFiles').addEventListener('change',async e=>{
   };
 });
 function openBatchLabels(id){const b=batchesAll().find(x=>x.id===id);if(!b)return;
-  const items=b.items.map(i=>{const p=BY_PCODE.get(i.code)||BY_SKU.get(i.sku);return {sku:p?p.sku:i.sku,qty:i.qty};});
+  const items=b.items.map(i=>{const p=byCode(i.code)||BY_SKU.get(i.sku);return {sku:p?p.sku:i.sku,qty:i.qty};});
   labelsFromReceipt({id:b.id,no:b.name,items,total:b.total,receipts:b.receipts});}
 
 /* ---------- Pretraga prijema po proizvodu ---------- */

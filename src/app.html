@@ -400,7 +400,7 @@ h2{font-size:13px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-
       <div class="note info" style="margin:0" id="apiState">Proveravam vezu…</div>
       <label id="pinWrap" hidden>PIN aplikacije<input class="field mono" id="setPin" type="password" inputmode="numeric" autocomplete="off"></label>
       <p class="muted" style="margin:0">Katalog: <span id="catCount"></span> artikala.</p>
-      <div class="sub-actions"><button class="btn" id="apiTest" type="button">Testiraj vezu</button><button class="btn" id="catReload" type="button">Učitaj katalog ponovo</button></div>
+      <div class="sub-actions"><button class="btn" id="apiTest" type="button">Testiraj vezu</button><button class="btn" id="catReload" type="button">Učitaj ceo katalog ponovo</button></div>
       <pre id="apiDiag" class="mono" style="white-space:pre-wrap;font-size:12px;margin:0;max-height:260px;overflow:auto;background:var(--surface-2);border-radius:8px;padding:10px" hidden></pre>
     </div>
   </div>
@@ -614,7 +614,7 @@ $('#list').addEventListener('focusout',e=>{if(e.target.id==='qedit'){const sku=e
 $('#list').addEventListener('keydown',e=>{if(e.target.id==='qedit'&&e.key==='Enter'){e.preventDefault();e.target.blur();}});
 $('#undoBtn').onclick=undo;
 function searchCat(q){q=q.trim().toLowerCase();if(!q)return[];const words=q.split(/\s+/);
-  return CATALOG.filter(p=>{const h=(p.name+' '+p.sku).toLowerCase();return words.every(w=>h.includes(w));}).slice(0,12);}
+  return CATALOG.filter(p=>{const h=(p.name+' '+p.sku).toLowerCase();return words.every(w=>h.includes(w));}).slice(0,60);}
 function suggestHtml(hits,q,label){return hits.length?hits.map(p=>'<button type="button" data-add="'+p.sku+'"><span><b>'+esc(p.name)+'</b><br><span class="muted mono">'+p.sku+'</span></span><span>'+label+'</span></button>').join(''):'<p class="muted">Nema artikla za „'+esc(q)+'“.</p>';}
 $('#manualInput').addEventListener('input',e=>{const q=e.target.value;$('#manualSuggest').innerHTML=q.trim()?suggestHtml(searchCat(q),q,'+ Dodaj 1'):'';});
 $('#manualSuggest').addEventListener('click',e=>{const b=e.target.closest('[data-add]');if(!b)return;handleCode(b.dataset.add,'manual');$('#manualInput').value='';$('#manualSuggest').innerHTML='';});
@@ -739,7 +739,7 @@ function renderApiState(){
   el.className='note '+(isLive()?'ok':Live.mode==='error'?'warn':'info');
   el.style.margin='0';
   el.innerHTML={demo:'Demo režim: server za Slanje Paketa nije podešen na ovom sajtu. Skeniranje i nalepnice rade, prijemi se čuvaju samo na ovom telefonu.',
-    live:'Povezano sa Slanje Paketa.'+(Live.fullAt?' Ceo katalog od '+new Date(Live.fullAt).toLocaleString('sr-RS',{day:'numeric',month:'numeric',hour:'2-digit',minute:'2-digit'})+', novi artikli se proveravaju pri svakom otvaranju.':''),
+    live:'Povezano sa Slanje Paketa. U aplikaciji je <b>'+CATALOG.length+'</b> artikala'+(Live.newCount?' (od toga '+Live.newCount+' novih danas)':'')+'.'+(Live.newErr?' <br>Provera najnovijih artikala nije uspela: '+esc(Live.newErr):'')+(Live.fullAt?' Ceo katalog od '+new Date(Live.fullAt).toLocaleString('sr-RS',{day:'numeric',month:'numeric',hour:'2-digit',minute:'2-digit'})+', novi artikli se proveravaju pri svakom otvaranju.':''),
     pin:'Upišite PIN aplikacije da bi se povezala sa Slanje Paketa.',
     building:'Ceo katalog još nije preuzet, rade samo najnoviji artikli ('+CATALOG.length+'). Na GitHub-u pokrenite Actions → Katalog → Run workflow (jednom), posle ide samo svake noći.',
     error:'Veza nije uspela: '+esc(Live.msg)}[Live.mode];
@@ -755,8 +755,8 @@ function askPin(then){
 let catItems=[];
 async function syncNewProducts(){
   const known=new Set(catItems.map(x=>x[0])); let cursor=null, got=[];
-  for(let i=0;i<20;i++){
-    const r=await apiFetch('/api/catalog-new?n='+(i?100:30)+(cursor?'&cursor='+encodeURIComponent(cursor):''));
+  for(let i=0;i<60;i++){
+    const r=await apiFetch('/api/catalog-new?n=25'+(cursor?'&cursor='+encodeURIComponent(cursor):''));
     const items=r.data.items||[]; let hit=false;
     for(const it of items){if(known.has(it[0])){hit=true;break;}got.push(it);}
     if(hit||!r.data.nextCursor||!items.length||!known.size)break;
@@ -778,10 +778,13 @@ async function loadCatalog(fresh){
     if(!fresh||!catItems.length){
       const r=await fetch('/data/catalog.json',{cache:'no-cache',headers:{'x-app-pin':S.pin||''}});
       if(r.status===401){const e=new Error('Pogrešan PIN');e.status=401;throw e;}
-      if(r.ok){const j=await r.json(); catItems=j.items||[]; Live.fullAt=j.syncedAt;} else Live.fullAt=null;
+      if(r.ok){const j=await r.json(); catItems=j.items||[]; Live.fullAt=j.syncedAt;
+        setCatalog(catItems.map(fromCompact).filter(p=>p.sku)); saveCatCache(catItems,Date.now());} // ceo katalog odmah, i ako sledeći korak ne uspe
+      else Live.fullAt=null;
     }
     // 2) svi artikli dodati posle noćnog preuzimanja: strana po strana dok ne naiđemo na poznat
-    await syncNewProducts();
+    Live.newErr='';
+    try{await syncNewProducts();}catch(e){if(e.status===401)throw e; Live.newErr=e.message;}
     if(!catItems.length)throw new Error('Katalog je prazan.');
     setCatalog(catItems.map(fromCompact).filter(p=>p.sku)); saveCatCache(catItems,Date.now());
     Live.mode=Live.fullAt?'live':'building'; Live.catAt=Date.now();
@@ -811,7 +814,7 @@ async function boot(){
   await loadCatalog();
 }
 $('#setPin').addEventListener('change',e=>{e.stopPropagation();S.pin=e.target.value.trim();save();loadCatalog();});
-$('#catReload').onclick=async()=>{const b=$('#catReload');b.disabled=true;await loadCatalog(true);b.disabled=false;toast(isLive()?'ok':'warn',isLive()?'Katalog osvežen':'Katalog nije učitan',CATALOG.length+' artikala');};
+$('#catReload').onclick=async()=>{const b=$('#catReload');b.disabled=true;catItems=[];await loadCatalog();b.disabled=false;toast(isLive()?'ok':'warn',isLive()?'Katalog osvežen':'Katalog nije učitan',CATALOG.length+' artikala');};
 $('#apiTest').onclick=async()=>{
   const d=$('#apiDiag'); d.hidden=false; d.textContent='Testiram…';
   try{const r=await apiFetch('/api/diag'); d.textContent=JSON.stringify(r.data,null,1)+'\n\n(Ovaj tekst možete poslati Claude-u. Ne sadrži token ni lične podatke.)';}

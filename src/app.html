@@ -613,9 +613,14 @@ $('#list').addEventListener('click',e=>{
 $('#list').addEventListener('focusout',e=>{if(e.target.id==='qedit'){const sku=editing;editing=null;setQty(sku,e.target.value);}});
 $('#list').addEventListener('keydown',e=>{if(e.target.id==='qedit'&&e.key==='Enter'){e.preventDefault();e.target.blur();}});
 $('#undoBtn').onclick=undo;
+const SIZE_ORDER=['xxs','xs','s','m','l','xl','xxl','2xl','3xl','4xl','univerzalna'];
+const natCmp=new Intl.Collator('sr',{numeric:true,sensitivity:'base'});
+function sizeRank(n){const z=splitName(n).size.toLowerCase();const i=SIZE_ORDER.indexOf(z);return i<0?99:i;}
+// sve pronađene artikle (bez skraćivanja), poređane po modelu pa po veličini
 function searchCat(q){q=q.trim().toLowerCase();if(!q)return[];const words=q.split(/\s+/);
-  return CATALOG.filter(p=>{const h=(p.name+' '+p.sku).toLowerCase();return words.every(w=>h.includes(w));}).slice(0,60);}
-function suggestHtml(hits,q,label){return hits.length?hits.map(p=>'<button type="button" data-add="'+p.sku+'"><span><b>'+esc(p.name)+'</b><br><span class="muted mono">'+p.sku+'</span></span><span>'+label+'</span></button>').join(''):'<p class="muted">Nema artikla za „'+esc(q)+'“.</p>';}
+  return CATALOG.filter(p=>{const h=(p.name+' '+p.sku+' '+(p.code||'')).toLowerCase();return words.every(w=>h.includes(w));})
+    .sort((a,b)=>natCmp.compare(splitName(a.name).model,splitName(b.name).model)||sizeRank(a.name)-sizeRank(b.name)).slice(0,500);}
+function suggestHtml(hits,q,label){return hits.length?'<p class="muted" style="margin:6px 0">Pronađeno: <b>'+hits.length+'</b>'+(hits.length>=500?' (prikazano prvih 500, suzite pretragu)':'')+'</p>'+hits.map(p=>'<button type="button" data-add="'+p.sku+'"><span><b>'+esc(p.name)+'</b><br><span class="muted mono">'+p.sku+'</span></span><span>'+label+'</span></button>').join(''):'<p class="muted">Nema artikla za „'+esc(q)+'“.</p>';}
 $('#manualInput').addEventListener('input',e=>{const q=e.target.value;$('#manualSuggest').innerHTML=q.trim()?suggestHtml(searchCat(q),q,'+ Dodaj 1'):'';});
 $('#manualSuggest').addEventListener('click',e=>{const b=e.target.closest('[data-add]');if(!b)return;handleCode(b.dataset.add,'manual');$('#manualInput').value='';$('#manualSuggest').innerHTML='';});
 $('#manualForm').addEventListener('submit',e=>{e.preventDefault();const v=$('#manualInput').value;const hits=searchCat(v);

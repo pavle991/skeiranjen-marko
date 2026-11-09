@@ -16,14 +16,8 @@ export async function onRequestPost({ request, env }) {
   try {
     const { items } = await request.json();
     if (!Array.isArray(items) || !items.length) return json({ error: "Prijem je prazan" }, 400);
-    // Robu donosite sami (GOODS_INDEPENDENT_DELIVERY): lokacija preuzimanja mora biti null.
-    // Magacin isporuke (obavezan): kao u poslednjem prijemu, inače Slanje Paketa magacin sa liste lokacija.
-    const last = ((await sp(env, "/product-shipments?limit=10&sort=-created_at")).data || []).find((s) => s.type === "RECEIPT");
-    let delivery = last && last.delivery_warehouse_location_id;
-    if (!delivery) {
-      const w = (await sp(env, "/warehouse-locations")).data || [];
-      delivery = (w.find((l) => !l.client_id) || w[0] || {})._id;
-    }
+    // Po uputstvu Slanje Paketa: robu donosimo sami, magacin isporuke je uvek "RS Slanje Paketa magacin".
+    const delivery = env.SP_DELIVERY_LOCATION || "63469d2fd2727cc620fa2b24";
     const body = {
       type: "RECEIPT",
       delivery_type: env.SP_DELIVERY_TYPE || "GOODS_INDEPENDENT_DELIVERY",

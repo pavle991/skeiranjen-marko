@@ -19,8 +19,26 @@ export async function onRequestGet({ env }) {
     if (own[0] && own[0]._id !== l._id) tries.push({ nacin: "GOODS_PICK_UP", preuzimanje: own[0], isporuka: l });
   }
   tries.push({ nacin: "GOODS_INDEPENDENT_DELIVERY", preuzimanje: null, isporuka: null });
+  // Dokumentacija za lokacije pominje polje "warehouse_location_id" - probaj i to ime polja
+  const SPM = "63469d2fd2727cc620fa2b24";
+  const variants = {
+    "1_samo_warehouse_location_id": { type: "RECEIPT", delivery_type: "GOODS_INDEPENDENT_DELIVERY", pickup_warehouse_location_id: null, warehouse_location_id: SPM, products: X },
+    "2_oba_polja": { type: "RECEIPT", delivery_type: "GOODS_INDEPENDENT_DELIVERY", pickup_warehouse_location_id: null, warehouse_location_id: SPM, delivery_warehouse_location_id: SPM, products: X },
+    "3_bez_pickup_polja": { type: "RECEIPT", delivery_type: "GOODS_INDEPENDENT_DELIVERY", delivery_warehouse_location_id: SPM, products: X },
+    "4_warehouse_bez_pickup": { type: "RECEIPT", delivery_type: "GOODS_INDEPENDENT_DELIVERY", warehouse_location_id: SPM, products: X },
+  };
+  out.varijante = {};
+  for (const [k, body] of Object.entries(variants)) {
+    try {
+      const j = await sp(env, "/product-shipments", { method: "POST", body: JSON.stringify(body) });
+      const id = (j.data || j)._id; let del = "";
+      if (id) { try { await sp(env, "/product-shipments/" + id, { method: "DELETE" }); del = " (obrisano)"; } catch (e) { del = " (NIJE OBRISANO " + id + ")"; } }
+      out.varijante[k] = "PRIHVAĆENO" + del;
+    } catch (e) { out.varijante[k] = e.status + " " + (e.body && e.body.code) + " " + e.message; }
+  }
+  if (new URL("http://x").searchParams) {} // (lista ispod ostaje za poređenje)
   out.rezultati = [];
-  for (const t of tries.slice(0, 24)) {
+  for (const t of tries.slice(0, 3)) {
     const body = { type: "RECEIPT", delivery_type: t.nacin, pickup_warehouse_location_id: t.preuzimanje ? t.preuzimanje._id : null,
       delivery_warehouse_location_id: t.isporuka ? t.isporuka._id : null, products: X };
     let r;

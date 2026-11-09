@@ -22,7 +22,8 @@ export async function onRequestPost({ request, env }) {
       type: "RECEIPT",
       delivery_type: last?.delivery_type || "GOODS_PICK_UP",
       pickup_warehouse_location_id: last ? last.pickup_warehouse_location_id : null,
-      delivery_warehouse_location_id: last ? last.delivery_warehouse_location_id : null,
+      // delivery_warehouse_location_id se NE šalje: Slanje Paketa ga ne dozvoljava preko API-ja (401 100208)
+      // i sam postavlja svoj podrazumevani magacin.
       products: items.map((i) => ({ code: String(i.code), dispatch_quantity: Number(i.qty) })),
     };
     if (body.delivery_type !== "GOODS_PICK_UP") body.pickup_warehouse_location_id = null;

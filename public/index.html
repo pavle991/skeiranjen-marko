@@ -400,7 +400,7 @@ h2{font-size:13px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-
       <div class="note info" style="margin:0" id="apiState">Proveravam vezu…</div>
       <label id="pinWrap" hidden>PIN aplikacije<input class="field mono" id="setPin" type="password" inputmode="numeric" autocomplete="off"></label>
       <p class="muted" style="margin:0">Katalog: <span id="catCount"></span> artikala.</p>
-      <div class="sub-actions"><button class="btn" id="apiTest" type="button">Testiraj vezu</button><button class="btn" id="catReload" type="button">Učitaj ceo katalog ponovo</button></div>
+      <div class="sub-actions"><button class="btn" id="apiTest" type="button">Testiraj vezu</button><button class="btn" id="apiTest2" type="button">Detaljna provera najave</button><button class="btn" id="catReload" type="button">Učitaj ceo katalog ponovo</button></div>
       <pre id="apiDiag" class="mono" style="white-space:pre-wrap;font-size:12px;margin:0;max-height:260px;overflow:auto;background:var(--surface-2);border-radius:8px;padding:10px" hidden></pre>
     </div>
   </div>
@@ -1214,6 +1214,11 @@ async function boot(){
 }
 $('#setPin').addEventListener('change',e=>{e.stopPropagation();S.pin=e.target.value.trim();save();loadCatalog();});
 $('#catReload').onclick=async()=>{const b=$('#catReload');b.disabled=true;catItems=[];await loadCatalog();b.disabled=false;toast(isLive()?'ok':'warn',isLive()?'Katalog osvežen':'Katalog nije učitan',CATALOG.length+' artikala');};
+$('#apiTest2').onclick=async()=>{
+  const d=$('#apiDiag'); d.hidden=false; d.textContent='Proveravam (do 30 sekundi)…';
+  try{const r=await apiFetch('/api/diag-najava'); d.textContent=JSON.stringify(r.data,null,1)+'\n\n(Pošaljite ovaj tekst Claude-u. Ništa nije kreirano.)';}
+  catch(e){d.textContent='GREŠKA '+(e.status||'')+': '+e.message;}
+};
 $('#apiTest').onclick=async()=>{
   const d=$('#apiDiag'); d.hidden=false; d.textContent='Testiram…';
   try{const r=await apiFetch('/api/diag'); d.textContent=JSON.stringify(r.data,null,1)+'\n\n(Ovaj tekst možete poslati Claude-u. Ne sadrži token ni lične podatke.)';}

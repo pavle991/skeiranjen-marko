@@ -19,6 +19,7 @@ export async function onRequestPost({ request, env }) {
     // Po uputstvu Slanje Paketa: robu donosimo sami, magacin isporuke je uvek "RS Slanje Paketa magacin".
     const delivery = env.SP_DELIVERY_LOCATION || "63469d2fd2727cc620fa2b24";
     const body = {
+      _id: null, // po uputstvu podrške Slanje Paketa (10.11.2026)
       type: "RECEIPT",
       delivery_type: env.SP_DELIVERY_TYPE || "GOODS_INDEPENDENT_DELIVERY",
       pickup_warehouse_location_id: null,

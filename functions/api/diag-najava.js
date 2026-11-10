@@ -22,6 +22,7 @@ export async function onRequestGet({ env }) {
   // Dokumentacija za lokacije pominje polje "warehouse_location_id" - probaj i to ime polja
   const SPM = "63469d2fd2727cc620fa2b24";
   const variants = {
+    "0_sa_id_null": { _id: null, type: "RECEIPT", delivery_type: "GOODS_INDEPENDENT_DELIVERY", pickup_warehouse_location_id: null, delivery_warehouse_location_id: SPM, products: X },
     "1_samo_warehouse_location_id": { type: "RECEIPT", delivery_type: "GOODS_INDEPENDENT_DELIVERY", pickup_warehouse_location_id: null, warehouse_location_id: SPM, products: X },
     "2_oba_polja": { type: "RECEIPT", delivery_type: "GOODS_INDEPENDENT_DELIVERY", pickup_warehouse_location_id: null, warehouse_location_id: SPM, delivery_warehouse_location_id: SPM, products: X },
     "3_bez_pickup_polja": { type: "RECEIPT", delivery_type: "GOODS_INDEPENDENT_DELIVERY", delivery_warehouse_location_id: SPM, products: X },

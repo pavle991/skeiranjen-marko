@@ -6,12 +6,5 @@ export async function onRequestGet({ env }) {
   const out = { kv: !!env.META };
   try { const j = await sp(env, "/products?limit=2&sort=-created_at"); out.products = (j.data || []).map(slimProduct); } catch (e) { out.products = "GREŠKA " + e.status + ": " + e.message; }
   try { const j = await sp(env, "/product-shipments?limit=1&sort=-created_at"); out.shipments = (j.data || []).map(slimShipment); } catch (e) { out.shipments = "GREŠKA " + e.status + ": " + e.message; }
-  try {
-    const j = await sp(env, "/product-shipments", { method: "POST", body: JSON.stringify({ type: "PROVERA_DOZVOLE", products: [] }) });
-    out.write_test = { status: "NEOČEKIVANO PRIHVAĆENO", body: j };
-  } catch (e) {
-    out.write_test = { status: e.status, message: e.message, body: e.body,
-      zakljucak: e.status === 401 || e.status === 403 || (e.body && e.body.code === 100208) ? "Token NEMA dozvolu za pravljenje najava" : "Dozvola postoji (odbijeno zbog podataka, što je očekivano)" };
-  }
   return json(out);
 }

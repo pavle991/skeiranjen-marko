@@ -13,4 +13,4 @@ jobs:
       - run: node scripts/probe-najava.mjs
         env:
           SP_TOKEN: ${{ secrets.SP_TOKEN }}
-          OBRISI: ${{ vars.OBRISI }}
+          OBRISI: "da"

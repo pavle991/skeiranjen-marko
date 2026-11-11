@@ -1,17 +1,15 @@
-// Ista proba kao u aplikaciji, ali sa GitHub-a (drugi server, drugi IP, bez Cloudflare-a).
-// Nepostojeći artikal -> ne može nastati prava najava; ako ipak nastane, odmah se briše.
+// Pregled: najave koje sadrže probni artikal "__NEPOSTOJECI_ARTIKAL__" (samo čitanje).
 import { sp } from "../lib/common.js";
 const env = { SP_TOKEN: process.env.SP_TOKEN };
-const X = [{ code: "__NEPOSTOJECI_ARTIKAL__", ean_code: null, should_barcode: false, dispatch_quantity: 1 }];
-const tests = {
-  sa_magacinom: { _id: null, type: "RECEIPT", delivery_type: "GOODS_INDEPENDENT_DELIVERY", pickup_warehouse_location_id: null, delivery_warehouse_location_id: "63469d2fd2727cc620fa2b24", products: X },
-  bez_magacina: { _id: null, type: "RECEIPT", delivery_type: "GOODS_INDEPENDENT_DELIVERY", pickup_warehouse_location_id: null, products: X },
-};
-for (const [k, body] of Object.entries(tests)) {
-  try {
-    const j = await sp(env, "/product-shipments", { method: "POST", body: JSON.stringify(body) });
-    const id = (j.data || j)._id; if (id) await sp(env, "/product-shipments/" + id, { method: "DELETE" }).catch(() => {});
-    console.log("PROBA", k, "PRIHVAĆENO (obrisano)");
-  } catch (e) { console.log("PROBA", k, e.status, JSON.stringify(e.body)); }
+const del = process.env.OBRISI === "da";
+const j = await sp(env, "/product-shipments?limit=50&sort=-created_at");
+for (const s of j.data || []) {
+  if ((s.products || []).some((p) => p.code === "__NEPOSTOJECI_ARTIKAL__")) {
+    let r = "";
+    if (del && s.status === "CREATED" && s.products.every((p) => p.code === "__NEPOSTOJECI_ARTIKAL__")) {
+      try { await sp(env, "/product-shipments/" + s._id, { method: "DELETE" }); r = " -> OBRISANO"; } catch (e) { r = " -> brisanje nije uspelo: " + e.message; }
+    }
+    console.log("PROBA", s.client_number, s._id, s.status, s.delivery_type, s.delivery_warehouse_location_id, s.created_at, s.products.length + " stavki" + r);
+  }
 }
-try { const j = await sp(env, "/products?limit=1"); console.log("PROBA citanje OK", (j.data || []).length); } catch (e) { console.log("PROBA citanje", e.status, e.message); }
+console.log("PROBA kraj");
